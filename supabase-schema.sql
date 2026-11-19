@@ -1,58 +1,3 @@
--- English Battle: Supabase SQL setup
--- Run this in Supabase Dashboard > SQL Editor.
-create extension if not exists pgcrypto;
-
-create table if not exists public.profiles (
-  id uuid primary key references auth.users(id) on delete cascade,
-  email text not null,
-  nickname text not null default '플레이어',
-  role text not null default 'member' check (role in ('member','admin')),
-  status text not null default 'active' check (status in ('active','suspended')),
-  created_at timestamptz not null default now(),
-  last_seen timestamptz
-);
-
-create table if not exists public.announcements (
-  id bigint generated always as identity primary key,
-  title text not null check (char_length(title) between 1 and 100),
-  body text not null check (char_length(body) between 1 and 2000),
-  created_by uuid not null references auth.users(id),
-  created_at timestamptz not null default now()
-);
-
-create table if not exists public.admin_logs (
-  id bigint generated always as identity primary key,
-  actor uuid not null references auth.users(id),
-  action text not null,
-  target_user_id uuid,
-  details jsonb not null default '{}'::jsonb,
-  created_at timestamptz not null default now()
-);
-
-create or replace function public.is_admin()
-returns boolean language sql stable security definer set search_path = public
-as $$ select exists (select 1 from public.profiles where id = auth.uid() and role='admin' and status='active'); $$;
-
-create or replace function public.handle_new_user()
-returns trigger language plpgsql security definer set search_path = public
-as $$
-begin
-  insert into public.profiles(id,email,nickname)
-  values(new.id, coalesce(new.email,''), left(coalesce(new.raw_user_meta_data->>'nickname','플레이어'),8));
-  return new;
-end; $$;
-drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created after insert on auth.users
-for each row execute procedure public.handle_new_user();
-
-alter table public.profiles enable row level security;
-alter table public.announcements enable row level security;
-alter table public.admin_logs enable row level security;
-
-drop policy if exists "profile self or admin read" on public.profiles;
-create policy "profile self or admin read" on public.profiles for select to authenticated
-using (id=auth.uid() or public.is_admin());
-drop policy if exists "profile self nickname update" on public.profiles;
 create policy "profile self nickname update" on public.profiles for update to authenticated
 using (id=auth.uid()) with check (id=auth.uid());
 -- Do not grant direct role/status edits from the browser.
@@ -97,3 +42,9 @@ grant execute on function public.admin_set_member_role(uuid,text) to authenticat
 
 -- 최초 관리자 지정: 회원가입 후 아래 쿼리의 이메일을 실제 관리자 이메일로 바꿔 실행.
 -- update public.profiles set role='admin' where email='YOUR_ADMIN_EMAIL';
+
+
+-- 지정 이메일로 이미 가입한 계정이 있다면 관리자 권한 적용
+update public.profiles
+set role = 'admin'
+where lower(trim(email)) = '22jj71e215@n.jbedu.kr';
